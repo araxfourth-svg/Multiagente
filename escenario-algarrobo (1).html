@@ -1,0 +1,568 @@
+<!doctype html>
+<html lang="es"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>El secreto del algarrobo de la luz – Escenario multiagente</title>
+<script type="importmap">{"imports":{
+"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+"@elevenlabs/client":"https://cdn.jsdelivr.net/npm/@elevenlabs/client@0.7.0/+esm"}}</script>
+<style>
+*{box-sizing:border-box}html,body{height:100%;margin:0}
+body{font:15px/1.4 "Trebuchet MS",system-ui,sans-serif;color:#2a1f14;background:#0b1030;display:flex;flex-direction:column}
+#wrap{flex:1;min-height:0;display:flex;align-items:center;justify-content:center;background:#000}
+#stage{position:relative;overflow:hidden;background:#000}#c{width:100%;height:100%;display:block}
+#sub{position:absolute;left:4%;right:4%;bottom:5%;text-align:center;color:#fff;text-shadow:0 2px 6px #000;background:#0008;border-radius:10px;padding:.4em .7em;opacity:0;transition:opacity .3s}
+#ttl{position:absolute;top:7%;left:0;right:0;text-align:center;color:#fff;font:bold clamp(16px,3.6vw,40px) Arial,sans-serif;letter-spacing:.1em;text-shadow:0 3px 10px #000;opacity:0;pointer-events:none;padding:0 4%}
+#ttl.show{animation:t 3.8s ease}@keyframes t{0%{opacity:0}15%,75%{opacity:1}100%{opacity:0}}
+aside{background:#fff3e6;padding:10px 12px calc(10px + env(safe-area-inset-bottom));overflow:auto;max-height:46vh;display:grid;gap:8px;align-content:start}
+h1{font-size:1.05rem;margin:0}.row{display:flex;gap:6px;flex-wrap:wrap;align-items:center}.note{font-size:.78rem;opacity:.85;margin:0}
+button,select{font:inherit;border-radius:12px;border:2px solid #0000;padding:9px 12px;min-height:44px}button{background:#d9611b;color:#fff;cursor:pointer}button.alt{background:#fff;color:#2a1f14;border-color:#e0b890}
+button:focus-visible,select:focus-visible,input:focus-visible{outline:3px solid #6a3de8}#stat{font-size:.85rem;font-weight:700}
+#err{background:#ffe1e1;color:#7a0b0b;border:2px solid #c0182b;border-radius:10px;padding:8px 10px;font-size:.85rem;font-weight:700;overflow-wrap:anywhere}
+[hidden]{display:none!important}
+dialog{border:0;border-radius:16px;max-width:420px;background:#fff3e6;color:#2a1f14}
+@media (min-width:900px){body{flex-direction:row}aside{width:350px;max-height:none;height:100%}}
+</style></head><body>
+<div id="wrap"><div id="stage"><canvas id="c" aria-label="Escenario 3D nocturno en el monte formoseño con Gaia, Don Algarrobo y Sombrío"></canvas><div id="ttl"></div><div id="sub" aria-live="polite"></div></div></div>
+<aside>
+<h1>El secreto del algarrobo de la luz</h1>
+<p class="note">Gaia, Don Algarrobo y Sombrío son personajes ficticios creados con inteligencia artificial. El monte es una recreación 3D estilizada; no es una foto ni un video real.</p>
+<div id="err" role="alert" hidden></div>
+<div id="stat">Listo.</div>
+<div class="row"><button id="b1">Charla en vivo (voz)</button><button class="alt" id="b2">Guion con voz</button><button class="alt" id="b3">Demostración sin conexión</button><button class="alt" id="b4">Terminar</button><button id="b5">Charlar con ellos</button></div>
+<div id="talkui" hidden class="row"><select id="to" aria-label="Con quién hablar"><option value="todos">Hablarles a los tres (de a uno)</option><option value="gaia">Hablarle a Gaia</option><option value="algarrobo">Hablarle a Don Algarrobo</option><option value="sombrio">Hablarle a Sombrío</option></select><button class="alt" id="mic" type="button">Activar mi micrófono</button><form id="tf" class="row" style="width:100%"><input type="text" id="tt" placeholder="Escribiles a los personajes…" aria-label="Mensaje para los personajes" style="flex:1;min-width:0;min-height:44px;border-radius:12px;border:2px solid #e0b890;padding:9px 12px"><button>Enviar</button></form></div>
+<div class="row"><label for="fmt">Formato:</label><select id="fmt"><option value="n">Pantalla completa de la página</option><option value="16">Cinematográfico 16:9</option><option value="9">Vertical 9:16</option></select><button class="alt" id="fs" type="button">Pantalla completa</button></div>
+<label class="row"><input type="checkbox" id="auto" checked> Cámara automática (corta al que habla)</label>
+<p class="note">Las voces son las de los tres agentes de ElevenLabs y consumen créditos de las cuentas de cada uno. Los personajes esperan a que el otro termine y se dan unos segundos antes de contestar. El micrófono queda silenciado salvo en «Charlar con ellos». "Guion con voz" dice el diálogo preparado; "Charla en vivo" improvisa. Si algo falla, aparece un cartel rojo con el personaje afectado y el texto del error.</p>
+</aside>
+<dialog id="dlg"><form method="dialog"><p><b>Antes de empezar</b></p><p>La página va a conectarse a tres agentes de ElevenLabs (Gaia, Don Algarrobo y Sombrío) y al proveedor de su modelo de lenguaje. El navegador puede pedirte permiso para el micrófono. Solo se usa si tocás «Activar mi micrófono» y se silencia mientras habla un personaje. Cada minuto de charla consume créditos. Los personajes son IA y pueden equivocarse.</p><div class="row"><button value="ok">Acepto</button><button class="alt" value="no">Cancelar</button></div></form></dialog>
+<script type="module">
+import * as THREE from 'three';
+const $=id=>document.getElementById(id),clamp=(x,a=0,b=1)=>Math.min(b,Math.max(a,x)),sleep=ms=>new Promise(r=>setTimeout(r,ms));
+// Agentes públicos de ElevenLabs (cada uno puede estar en una cuenta distinta)
+const AG={gaia:{id:'agent_4201m5gnwjrmfpa8j1cbgkmr4qg9',name:'Gaia',col:'#9be3b0'},algarrobo:{id:'agent_2701m5hrpabffjmvxtpfft9ywr8x',name:'Don Algarrobo',col:'#f0cf8a'},sombrio:{id:'agent_6001m5hwftkjf70bafxqxbkp73v9',name:'Sombrío',col:'#cdb2ff'}};
+const ORDER=['gaia','algarrobo','sombrio'];
+const SCRIPT=[
+['gaia','Buenas noches a todos. Hoy quiero hablarles de algo extraordinario que está ocurriendo en el monte formoseño. Dicen que un antiguo algarrobo comienza a brillar en medio de la noche. ¿Qué creen que puede estar pasando?'],
+['algarrobo','¡Buenas noches, Gaia! Ese árbol es muy antiguo. Sus raíces han visto pasar generaciones enteras. Pero debo admitir que últimamente siento algo extraño en el monte. ¡Y eso que llevo muchísimos años viviendo acá!'],
+['sombrio','Interesante… Un árbol que brilla en la oscuridad. Esto puede ser un fenómeno natural, una ilusión óptica o un misterio que todavía no sabemos explicar. ¡Por fin un caso digno de mi talento detectivesco!'],
+['gaia','Sombrío, me alegra tu entusiasmo, pero debemos investigar con cuidado. Lo más importante es proteger el monte y a todos los seres vivos que habitan en él.'],
+['algarrobo','¡Exactamente! En este lugar viven aves, insectos y muchos otros animales. Además, los árboles ofrecemos sombra, alimento y refugio. Si dañamos la naturaleza para resolver un misterio, terminaremos creando un problema todavía mayor.'],
+['sombrio','Tienen razón. Investigar no significa destruir. Podríamos observar las luces desde una distancia segura y registrar cuándo aparecen. Quizás sean luciérnagas, reflejos o algún otro fenómeno natural.'],
+['gaia','¡Esa es una buena idea! Pero, Algarrobo, ¿vos sabés algo más sobre esas luces?'],
+['algarrobo','Mis raíces no tienen ojos, Sombrío, ¡pero si pudieran hablar de todo lo que han sentido, tendríamos historias para mil noches! Algunos animales se acercan al árbol cuando aparecen las luces y después desaparecen entre los pastizales.'],
+['sombrio','¡Un momento! ¿Animales que aparecen, luces misteriosas y un árbol antiguo? Esto cada vez se pone más interesante. Aunque espero que los animales no quieran interrogarme a mí.'],
+['gaia','¡Jajaja! No tengas miedo, Sombrío. Los animales también forman parte de este maravilloso ecosistema. Quizás las luces estén relacionadas con ellos o con las condiciones del ambiente.'],
+['algarrobo','Hay algo que quiero que entiendan. El monte no necesita magia para ser maravilloso. Cada planta, cada insecto y cada animal cumple una función. Muchas veces las personas desconocen las maravillas que tienen delante de sus propios ojos.'],
+['sombrio','Estoy de acuerdo. A veces llamamos sobrenatural a algo simplemente porque todavía no lo comprendemos. La curiosidad nos lleva a investigar, pero necesitamos pruebas antes de afirmar que descubrimos una explicación.'],
+['gaia','¡Exactamente! Y mientras investigamos, también podemos enseñar a las personas a cuidar los árboles, evitar los incendios y no arrojar basura en el monte.'],
+['algarrobo','¡Eso me encanta! Imaginen un futuro en el que las personas puedan disfrutar de la naturaleza sin destruirla. Me gustaría que las nuevas generaciones conocieran el monte y aprendieran a respetarlo.'],
+['sombrio','Entonces tenemos una misión doble: descubrir el origen de las luces y compartir lo que aprendamos. Aunque tengo una pregunta importante… Si el árbol empieza a brillar cuando estemos ahí, ¿quién se acerca primero?'],
+['gaia','Yo puedo acercarme con tranquilidad, siempre que sea seguro y sin alterar el entorno.'],
+['algarrobo','Yo ya estoy aquí, ¡así que no tengo que caminar ni un paso!'],
+['sombrio','¡Qué conveniente! Bueno, yo llevaré mi libreta, mis instrumentos y mi valentía.'],
+['gaia','¿Tu valentía? ¿No era que ibas a tomar notas desde atrás?'],
+['sombrio','¡Una cosa es ser valiente y otra muy distinta es exponerse innecesariamente! Un buen investigador sabe cuándo avanzar… y cuándo dejar que otro avance primero.'],
+['algarrobo','¡Jajaja! ¡Este misterio va a ser más divertido de lo que imaginaba!'],
+['gaia','Entonces estamos de acuerdo. Investigaremos con responsabilidad, escucharemos lo que la naturaleza tiene para enseñarnos y compartiremos nuestros descubrimientos.'],
+['sombrio','Y no olvidaremos comprobar las pruebas antes de sacar conclusiones. ¡Que nadie diga que Sombrío resuelve misterios inventando respuestas!'],
+['algarrobo','¡Por el monte formoseño, sus árboles y todos sus habitantes!'],
+['gaia','¡Por la Tierra y por quienes trabajan para protegerla!'],
+['sombrio','¡Y por los misterios que todavía nos quedan por descubrir!'],
+['todos','¡Que comience la investigación!']];
+const FINAL='La naturaleza está llena de maravillas. Investigar nos ayuda a comprenderlas, y cuidarlas es responsabilidad de todos.';
+// ---------- avisos de error visibles ----------
+function banner(t){const e=$('err');e.hidden=false;e.textContent=t;console.error(t)}
+addEventListener('error',e=>banner('Error de la página: '+e.message));
+addEventListener('unhandledrejection',e=>banner('Error: '+(e.reason&&e.reason.message||e.reason)));
+const fail=(k,etapa,e)=>{const m=AG[k].name+' · '+etapa+': '+((e&&e.message)||e);banner('No se pudo completar. '+m);st('Error con '+AG[k].name+'.')};
+// ---------- escena nocturna del monte ----------
+const stage=$('stage'),cv=$('c');let R;
+try{R=new THREE.WebGLRenderer({canvas:cv,antialias:true})}catch(e){banner('Este navegador no pudo iniciar gráficos 3D (WebGL): '+e.message)}
+R.shadowMap.enabled=true;R.shadowMap.type=THREE.PCFSoftShadowMap;
+const S=new THREE.Scene(),cam=new THREE.PerspectiveCamera(36,1,.1,150);
+const sk=document.createElement('canvas');sk.width=4;sk.height=256;const sx=sk.getContext('2d'),gr=sx.createLinearGradient(0,0,0,256);
+[[0,'#070b25'],[.45,'#14204a'],[.8,'#2b3a63'],[1,'#3d4a6a']].forEach(([o,c])=>gr.addColorStop(o,c));sx.fillStyle=gr;sx.fillRect(0,0,4,256);
+S.background=new THREE.CanvasTexture(sk);S.background.colorSpace=THREE.SRGBColorSpace;S.fog=new THREE.Fog(0x1a2547,18,70);
+S.add(new THREE.HemisphereLight(0x9fb4ff,0x23351f,1.5));
+const moon=new THREE.DirectionalLight(0xb9ccff,2.2);moon.position.set(-8,14,9);moon.castShadow=true;moon.shadow.mapSize.set(1024,1024);Object.assign(moon.shadow.camera,{left:-14,right:14,top:12,bottom:-8,near:1,far:50});S.add(moon);
+const warm=new THREE.PointLight(0xffc766,60,22,1.6);warm.position.set(0,5.4,-3.4);S.add(warm);
+const gnd=new THREE.Mesh(new THREE.CircleGeometry(70,56),new THREE.MeshStandardMaterial({color:0x32502c,roughness:1}));gnd.rotation.x=-Math.PI/2;gnd.receiveShadow=true;S.add(gnd);
+let sd0=7;const rnd0=()=>(sd0=sd0*16807%2147483647)/2147483647;
+const SPH0=new THREE.SphereGeometry(1,16,10),trM=new THREE.MeshStandardMaterial({color:0x4a3322,roughness:1}),lvM=[0x1f4a2a,0x2a5a2e,0x1a3d28].map(c=>new THREE.MeshStandardMaterial({color:c,roughness:1}));
+for(let i=0;i<22;i++){const g=new THREE.Group(),x=-34+i*3.2+rnd0()*2,z=-12-rnd0()*14,h=3+rnd0()*3;
+ const t=new THREE.Mesh(new THREE.CylinderGeometry(.2,.32,h,6),trM);t.position.y=h/2;g.add(t);const c=new THREE.Mesh(SPH0,lvM[i%3]);c.position.y=h+.5;c.scale.set(2,1.3,2);g.add(c);g.position.set(x,0,z);S.add(g)}
+for(let i=0;i<40;i++){const b=new THREE.Mesh(SPH0,lvM[i%3]);const x=(rnd0()-.5)*30,z=-7-rnd0()*6;b.position.set(x,.5,z);b.scale.set(1+rnd0(),.6+rnd0()*.5,1+rnd0());S.add(b)}
+const tuft=new THREE.ConeGeometry(.08,.6,4),grass=new THREE.InstancedMesh(tuft,new THREE.MeshStandardMaterial({color:0x3d6a33}),320),mx=new THREE.Matrix4();
+for(let i=0;i<320;i++){const a=rnd0()*6.28,d=3+rnd0()*13;mx.makeTranslation(Math.cos(a)*d,.25,Math.sin(a)*d*.8+1);grass.setMatrixAt(i,mx)}S.add(grass);
+// luna y estrellas
+const moonM=new THREE.Mesh(new THREE.SphereGeometry(2.2,24,16),new THREE.MeshBasicMaterial({color:0xeef3ff,fog:false}));moonM.position.set(-18,22,-55);S.add(moonM);
+const sp=new Float32Array(900);for(let i=0;i<300;i++){const r=60+rnd0()*20,a=rnd0()*6.28,b=rnd0()*1.2+.15;sp.set([r*Math.cos(b)*Math.cos(a),r*Math.sin(b)+4,-Math.abs(r*Math.cos(b)*Math.sin(a))-10],i*3)}
+const sg=new THREE.BufferGeometry();sg.setAttribute('position',new THREE.BufferAttribute(sp,3));S.add(new THREE.Points(sg,new THREE.PointsMaterial({color:0xffffff,size:.25,fog:false})));
+// luciérnagas
+const NF=60,fp=new Float32Array(NF*3),fs=[];for(let i=0;i<NF;i++){fp.set([(rnd0()-.5)*22,.5+rnd0()*5,-6+rnd0()*12],i*3);fs.push(rnd0()*6)}
+const fg=new THREE.BufferGeometry();fg.setAttribute('position',new THREE.BufferAttribute(fp,3));const fm=new THREE.PointsMaterial({color:0xfff2a0,size:.16,transparent:true,opacity:.9,depthWrite:false});S.add(new THREE.Points(fg,fm));
+// ---------- personajes (figuras tomadas de tus archivos) ----------
+function buildGaia(){
+const mat=(c,o)=>new THREE.MeshStandardMaterial(Object.assign({color:c,roughness:.5,metalness:0},o||{}));
+const mesh=(g,m,p,s)=>{const o=new THREE.Mesh(g,m);if(p)o.position.set(...p);if(s)o.scale.set(...s);return o};
+const sph=(r,w=24,h=16)=>new THREE.SphereGeometry(r,w,h);
+function earthTex(w,h,base,land,seed,n){const c=document.createElement('canvas');c.width=w;c.height=h;const x=c.getContext('2d');
+const gr=x.createLinearGradient(0,0,0,h);gr.addColorStop(0,base[0]);gr.addColorStop(1,base[1]);x.fillStyle=gr;x.fillRect(0,0,w,h);
+let s=seed;const r=()=>(s=(s*16807)%2147483647)/2147483647;x.lineJoin='round';
+for(let i=0;i<n;i++){const cx=w*.08+r()*w*.84,cy=h*.12+r()*h*.76,m=w*(.03+r()*.05);x.beginPath();
+for(let k=0;k<=14;k++){const a=k/14*6.283,d=m*(.55+r()*.7);x[k?'lineTo':'moveTo'](cx+Math.cos(a)*d*1.7,cy+Math.sin(a)*d)}
+x.closePath();x.fillStyle=land;x.fill();x.strokeStyle='rgba(225,250,230,.55)';x.lineWidth=2;x.stroke()}
+return new THREE.CanvasTexture(c)}
+const earthM=(map,r)=>new THREE.MeshPhysicalMaterial({color:0xffffff,map,roughness:r,clearcoat:.25,clearcoatRoughness:.5,emissive:0x1f4a3a,emissiveIntensity:.18});
+const headMat=earthM(earthTex(1024,512,['#b3ebe2','#8fd6dc'],'#86cc72',7,26),.45);
+const bodyMat=earthM(earthTex(512,256,['#8fdcc4','#74c0dc'],'#78c466',11,34),.55);
+const handMat=mat(0x9edfa6,{roughness:.55});
+const greens=[0x5fae5a,0x78bf62,0x4f9d56,0x8acb70,0x3f8f52];
+const bulge=(g,f)=>{const p=g.attributes.position;for(let i=0;i<p.count;i++){const x=p.getX(i),y=p.getY(i),z=p.getZ(i),s=f(x,y,z);p.setXYZ(i,x*s[0],y*s[1],z*s[2])}g.computeVertexNormals();return g};
+const ori=(p,z,y)=>{z=z.clone().normalize();const x=new THREE.Vector3().crossVectors(y,z).normalize(),yy=new THREE.Vector3().crossVectors(z,x);p.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(x,yy,z))};
+// hojas con volumen, nervaduras y bordes curvos
+const lc=document.createElement('canvas');lc.width=64;lc.height=128;
+{const x=lc.getContext('2d');x.fillStyle='#fff';x.fillRect(0,0,64,128);x.strokeStyle='#bcdcab';x.lineWidth=3;x.beginPath();x.moveTo(32,128);x.lineTo(32,4);x.stroke();x.lineWidth=1.6;
+for(let y=118;y>14;y-=14){x.beginPath();x.moveTo(32,y);x.lineTo(6,y-22);x.moveTo(32,y);x.lineTo(58,y-22);x.stroke()}}
+const leafTex=new THREE.CanvasTexture(lc);
+function leafGeo(drop,curl){const g=new THREE.PlaneGeometry(1,1,6,10),p=g.attributes.position;
+for(let i=0;i<p.count;i++){const u=p.getX(i)*2,v=p.getY(i)+.5,w=Math.pow(Math.sin(Math.PI*Math.pow(v,.7)),.65)*.5;
+p.setXYZ(i,u*w,-curl*u*u*Math.min(1,w*2.2)+drop*v*v+.025*(1-Math.abs(u))*Math.sin(v*3.14),v)}
+g.computeVertexNormals();return g}
+const Gs=leafGeo(-.18,.22),Gm=leafGeo(-.24,.3),lmat=greens.map(c=>mat(c,{map:leafTex,side:THREE.DoubleSide,roughness:.6}));
+function leaf(parent,pos,z,y,L,W,i,roll){const p=new THREE.Group();p.position.copy(pos);ori(p,z,y);p.rotateZ(roll);
+p.add(mesh(i%3?Gm:Gs,lmat[i%5],null,[W,.9,L]));parent.add(p);p.userData={q:p.quaternion.clone(),ph:i*1.7};return p}
+// ---------- Jerarquía del personaje ----------
+const G=new THREE.Group(),root=new THREE.Group();G.add(root);
+const torso=mesh(bulge(sph(.52,32,22),(x,y)=>[1+.14*Math.max(0,-y)/.52,1,1+.1*Math.max(0,-y)/.52]),bodyMat,[0,.2,0],[1,1.05,.9]);root.add(torso);
+const hp=new THREE.Group();hp.position.set(0,.8,0);root.add(hp);
+const face=new THREE.Group();face.position.y=.6;hp.add(face);
+face.add(mesh(bulge(sph(1,56,36),(x,y)=>[1+.07*Math.max(0,-y),1-.04*Math.max(0,y-.4),1]),headMat));
+function irisTex(){const c=document.createElement('canvas');c.width=c.height=128;const x=c.getContext('2d');
+let g=x.createRadialGradient(64,64,4,64,64,62);g.addColorStop(0,'#8fd493');g.addColorStop(.55,'#5aa866');g.addColorStop(.88,'#3f8350');g.addColorStop(1,'#2b5e3a');
+x.fillStyle=g;x.beginPath();x.arc(64,64,62,0,6.283);x.fill();x.save();x.beginPath();x.arc(64,64,62,0,6.283);x.clip();
+x.strokeStyle='rgba(190,240,190,.25)';x.lineWidth=1.5;for(let a=0;a<6.283;a+=.35){x.beginPath();x.moveTo(64+Math.cos(a)*20,64+Math.sin(a)*20);x.lineTo(64+Math.cos(a)*52,64+Math.sin(a)*52);x.stroke()}
+g=x.createRadialGradient(64,104,2,64,100,36);g.addColorStop(0,'rgba(190,240,170,.55)');g.addColorStop(1,'rgba(190,240,170,0)');x.fillStyle=g;x.fillRect(0,0,128,128);x.restore();
+return new THREE.CanvasTexture(c)}
+const irisT=irisTex();
+const EA=.248,EB=.298,EZ=.065,sz=(x,y)=>EZ*Math.sqrt(Math.max(0,1-(x/EA)**2-(y/EB)**2))+.006,yt=x=>EB*Math.sqrt(Math.max(0,1-(x/EA)**2));
+function strip(N,M,m){const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.BufferAttribute(new Float32Array((N+1)*(M+1)*3),3));
+const ix=[];for(let i=0;i<N;i++)for(let j=0;j<M;j++){const p=i*(M+1)+j,q=p+M+1;ix.push(p,q,p+1,q,q+1,p+1)}
+g.setIndex(ix);const o=new THREE.Mesh(g,m);o.frustumCulled=false;
+o.fill=f=>{const P=g.attributes.position;let k=0;for(let i=0;i<=N;i++)for(let j=0;j<=M;j++){const v=f(i/N,j/M);P.setXYZ(k++,v[0],v[1],v[2])}P.needsUpdate=true;g.computeVertexNormals()};return o}
+function makeEye(sx){const g=new THREE.Group();g.position.set(sx*.34,.06,.925);g.rotation.y=sx*.3;
+const sc=mesh(sph(1,28,18),mat(0xf2f6f1,{roughness:.45}),null,[.24,.29,.06]);
+const pg=new THREE.Group();pg.position.z=.064;
+const iris=mesh(new THREE.CircleGeometry(.165,36),mat(0xffffff,{map:irisT,transparent:true,alphaTest:.5,roughness:.5}));iris.scale.y=1.08;
+const pupil=mesh(new THREE.CircleGeometry(.07,28),mat(0x07110b,{roughness:.3}),[0,0,.002]);
+const hl=(r,x,y,z)=>mesh(new THREE.CircleGeometry(r,16),new THREE.MeshBasicMaterial({color:0xfbfff8}),[x,y,z]);
+pg.add(iris,pupil,hl(.032,.055,.07,.004),hl(.014,-.05,-.055,.004));
+// párpados: mallas que siguen la superficie del ojo y se deslizan sobre él; pestañas pegadas al borde
+const skin=mat(0xb3ebe2,{roughness:.45,side:THREE.DoubleSide,emissive:0x1f4a3a,emissiveIntensity:.18}),dk=mat(0x2f4a33,{roughness:.6,side:THREE.DoubleSide});
+const up=strip(20,5,skin),lo=strip(20,5,skin),lash=strip(20,1,dk),ls=[0,1,2].map(()=>strip(1,2,dk));
+const lid=new THREE.Group();lid.add(up,lo,lash,...ls);g.add(sc,pg,lid);face.add(g);
+const setLid=(v,s)=>{const c=Math.max(0,Math.min(1,(1.1-v)/1.02)),k=1-2*c,kl=1-.6*s;
+up.fill((u,w)=>{const x=-EA+2*EA*u,t=yt(x),y=t+(t*k-t)*w;return[x,y,sz(x,y)]});
+lo.fill((u,w)=>{const x=-EA+2*EA*u,t=-yt(x),y=t+(t*kl-t)*w;return[x,y,sz(x,y)]});
+lash.fill((u,w)=>{const x=-EA+2*EA*u,y=yt(x)*k,yy=w?y-(.008+.006*Math.max(0,sx*x/EA)):y+.003;return[x,yy,sz(x,yy)+.004]});
+ls.forEach((m,n)=>{const xb=sx*EA*(.72+.12*n),yb=yt(xb)*k,L=.085-.012*n,dx=sx*(.45+.22*n),dy=.85-.12*n,h=Math.hypot(dx,dy),ux=dx/h,uy=dy/h,zb=sz(xb,yb)+.004;
+m.fill((u,w)=>{const cx=xb+ux*L*w+sx*L*.35*w*w,cy=yb+uy*L*w-.15*L*w*w,hw=(.006*(1-w)+.0008)*(u*2-1),zt=Math.max(-.03,.01-.3*Math.max(0,Math.abs(cx)-EA));
+return[cx+uy*hw,cy-ux*hw,zb*(1-w)+zt*w]})})};
+setLid(1,0);return{g,pg,lid,setLid}}
+const eL=makeEye(-1),eR=makeEye(1);
+function makeBrow(sx){const g=new THREE.Group();g.position.set(sx*.34,.46,.835);g.rotation.y=sx*.3;
+const a=mesh(new THREE.TorusGeometry(.16,.007,6,20,1.3),mat(0x3d6b46,{roughness:.7,transparent:true,opacity:.85}),[0,-.16,0]);a.rotation.z=Math.PI/2-.65;g.add(a);face.add(g);return g}
+const bL=makeBrow(-1),bR=makeBrow(1);
+[-1,1].forEach(s=>{const c=mesh(sph(.17),mat(0xff9db0,{transparent:true,opacity:.45,roughness:1}),[s*.56,-.12,.78],[1,.7,.25]);c.rotation.y=s*.6;face.add(c)});
+const mouth=new THREE.Group();mouth.position.set(0,-.28,.955);face.add(mouth);
+const inner=mesh(sph(.07,16,10),mat(0x7a1f2b),null,[1,.01,.5]);
+const lips=mesh(new THREE.TorusGeometry(.085,.011,8,20,Math.PI),mat(0x8a3d3d),[0,.04,.01]);lips.rotation.z=Math.PI;mouth.add(inner,lips);
+// corona frondosa: hojas superpuestas por toda la cabeza (frente, laterales, nuca y coronilla)
+const leaves=[],flowers=[];let sd=5;const rnd=()=>(sd=(sd*16807)%2147483647)/2147483647;
+for(let i=0;i<110;i++){const y=1-(i+.5)/110*1.32,r=Math.sqrt(1-y*y),ph=i*2.39996,d=new THREE.Vector3(r*Math.sin(ph),y,r*Math.cos(ph));
+if(d.z>0&&d.y<.6&&Math.abs(d.x)<.78)continue;
+const th=Math.acos(y);let T=new THREE.Vector3(Math.cos(th)*Math.sin(ph),-Math.sin(th),Math.cos(th)*Math.cos(ph)),L=.34+rnd()*.22;
+if(d.z>.1&&y<.85){T=new THREE.Vector3(Math.sign(d.x)||1,.35,-.3);L*=.75}
+leaves.push(leaf(face,d.clone().multiplyScalar(.93+rnd()*.05),T.addScaledVector(d,.22+rnd()*.25),d,L,L*(.75+rnd()*.3),i,(rnd()-.5)*.7))}
+[[.45,.6],[.75,-1.2],[.55,2.4],[1.05,1.9],[.9,-2.6],[.3,-.4],[1.15,.4]].forEach(([th,ph],i)=>{const d=new THREE.Vector3(Math.sin(th)*Math.sin(ph),Math.cos(th),Math.sin(th)*Math.cos(ph)),f=new THREE.Group();
+f.position.copy(d).multiplyScalar(1.12);ori(f,d,Math.abs(d.y)>.85?new THREE.Vector3(1,0,0):new THREE.Vector3(0,1,0));f.scale.setScalar(.85+(i%3)*.15);
+for(let k=0;k<5;k++){const a=k/5*6.283;f.add(mesh(sph(.07,10,8),mat(0xffffff,{roughness:.5}),[Math.cos(a)*.085,Math.sin(a)*.085,0],[1,1,.4]))}
+f.add(mesh(sph(.045,10,8),mat(0xffcf3d,{roughness:.5}),[0,0,.025],[1,1,.7]));face.add(f);flowers.push(f)});
+// brazos y piernas cortos y suaves, manos y pies redondeados
+function arm(sx){const p=new THREE.Group();p.position.set(sx*.45,.46,0);
+p.add(mesh(sph(.13),bodyMat,[0,-.14,0],[1,1.5,1]),mesh(sph(.145),handMat,[0,-.36,.01]),mesh(sph(.06),handMat,[sx*.12,-.36,.07]));root.add(p);return p}
+const aL=arm(-1),aR=arm(1);
+function leg(sx){const p=new THREE.Group();p.position.set(sx*.24,-.1,0);
+p.add(mesh(sph(.17),bodyMat,[0,-.1,0],[1,1.3,1]),mesh(sph(.2),handMat,[0,-.29,.07],[1,.65,1.35]));root.add(p);return p}
+const lgL=leg(-1),lgR=leg(1);
+// capa de hojas superpuestas en tres niveles
+const cape=new THREE.Group();cape.position.set(0,.68,0);root.add(cape);
+[[6,0,.5,.34],[8,-.17,.62,.4],[6,-.34,.74,.46]].forEach(([n,y,L,W],ti)=>{for(let i=0;i<n;i++){const a=(i/(n-1)-.5)*2.5*(1+ti*.05);
+leaves.push(leaf(cape,new THREE.Vector3(Math.sin(a)*.46,y,-Math.cos(a)*.42),new THREE.Vector3(Math.sin(a)*.35,-1,-Math.cos(a)*.35),new THREE.Vector3(Math.sin(a),.25,-Math.cos(a)),L*(.9+rnd()*.2),W,i+ti*3,(rnd()-.5)*.3))}});
+// bandolera: correa que sigue la superficie del torso + bolsita con volumen
+const rx=.52,ry=.546,rz=.468,surf=(x,y)=>new THREE.Vector3(x,y,rz*Math.sqrt(Math.max(.02,1-(x/rx)**2-((y-.2)/ry)**2))+.02);
+const sp=[];for(let i=0;i<=8;i++){const s=i/8;sp.push(surf(-.28+.66*s,.64-.66*s))}
+root.add(mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(sp),24,.032,8),mat(0x8a5a33,{roughness:.75})));
+const bag=new THREE.Group();bag.position.set(.38,-.12,.2);
+bag.add(mesh(sph(.13),mat(0x9b6a3c,{roughness:.7}),null,[.8,1,.85]),mesh(sph(.125),mat(0x7d5230,{roughness:.7}),[0,.07,.015],[.9,.5,.9]),mesh(sph(.025),mat(0xe8d9a0,{roughness:.4}),[0,.03,.11]));root.add(bag);
+// sombra y motas de luz
+const sc=document.createElement('canvas');sc.width=sc.height=64;const sx=sc.getContext('2d'),gr=sx.createRadialGradient(32,32,2,32,32,30);
+gr.addColorStop(0,'rgba(20,40,20,.45)');gr.addColorStop(1,'rgba(20,40,20,0)');sx.fillStyle=gr;sx.fillRect(0,0,64,64);
+const shadow=mesh(new THREE.PlaneGeometry(2.2,2.2),new THREE.MeshBasicMaterial({map:new THREE.CanvasTexture(sc),transparent:true,depthWrite:false}),[0,-.56,0]);shadow.rotation.x=-Math.PI/2;G.add(shadow);
+const N=36,pp=new Float32Array(N*3);for(let i=0;i<N*3;i+=3){pp[i]=(Math.random()-.5)*6;pp[i+1]=Math.random()*4-.5;pp[i+2]=(Math.random()-.5)*3}
+const mg=new THREE.BufferGeometry();mg.setAttribute('position',new THREE.BufferAttribute(pp,3));
+
+
+return {G,root,hp,face,eL,eR,bL,bR,inner,lips,aL,aR,lgL,lgR,cape,shadow};}
+
+const LC=h=>new THREE.Color().setHex(h,THREE.LinearSRGBColorSpace);
+function buildSombrio(){
+var seed=11;function rnd(){seed=(seed*16807)%2147483647;return (seed-1)/2147483646;}
+function sstep(a,b,x){var t=Math.max(0,Math.min(1,(x-a)/(b-a)));return t*t*(3-2*t);}
+
+/* Material de humo: lavanda lechosa, centro luminoso, borde brillante, base más violeta */
+function smokeMat(o){
+  return new THREE.ShaderMaterial({
+    uniforms:{uBase:{value:LC(o.base)},uMid:{value:LC(o.mid)},uRim:{value:LC(o.rim)},uLow:{value:LC(o.low==null?o.base:o.low)},
+      uAlpha:{value:o.alpha==null?1:o.alpha},uEdge:{value:o.edge||0},uRimK:{value:o.rimK||.85},uT:{value:0}},
+    vertexShader:"varying vec3 vN;varying vec3 vV;varying vec3 vP;void main(){vP=position;vec4 mv=modelViewMatrix*vec4(position,1.);vN=normalize(normalMatrix*normal);vV=normalize(-mv.xyz);gl_Position=projectionMatrix*mv;}",
+    fragmentShader:"uniform vec3 uBase,uMid,uRim,uLow;uniform float uAlpha,uEdge,uRimK,uT;varying vec3 vN;varying vec3 vV;varying vec3 vP;"+
+      "void main(){vec3 N=normalize(vN);vec3 V=normalize(vV);if(!gl_FrontFacing)N=-N;"+
+      "float d=clamp(dot(N,V),0.,1.);float fr=pow(1.-d,2.3);"+
+      "float l=clamp(dot(N,normalize(vec3(-.35,.6,.75)))*.5+.5,0.,1.);"+
+      "float n=.5+.5*sin(vP.x*6.+vP.y*3.+uT*.6)*sin(vP.z*5.-vP.y*4.+uT*.5);"+
+      "vec3 c=mix(uBase,uMid,l*.75+n*.2);c=mix(c,uMid*1.2,pow(d,2.5)*.5);"+
+      "c=mix(uLow,c,smoothstep(-1.45,-.35,vP.y));c+=uRim*fr*uRimK;"+
+      "float a=uAlpha*(1.-uEdge*(1.-pow(d,.7)));gl_FragColor=vec4(c,a);}",
+    transparent:!!o.transparent,side:THREE.DoubleSide
+  });
+}
+var mats=[];
+function M(o){var m=smokeMat(o);mats.push(m);return m;}
+var bodyM=M({base:0x7d55e6,mid:0xb79bff,rim:0xf3e6ff,low:0x6a3fd8,rimK:1.15,edge:.28,alpha:.97,transparent:true});
+var haloM=M({base:0x9a6cff,mid:0xb894ff,rim:0xd8c0ff,alpha:.24,transparent:true});
+haloM.side=THREE.BackSide;haloM.blending=THREE.AdditiveBlending;haloM.depthWrite=false;
+
+var rig=new THREE.Group();rig.scale.setScalar(.85);
+var pivot=new THREE.Group();rig.add(pivot);
+var SPH=new THREE.SphereGeometry(1,18,14);
+function sph(m,x,y,z,sx,sy,sz,par){var o=new THREE.Mesh(SPH,m);o.position.set(x,y,z);o.scale.set(sx,sy,sz);(par||pivot).add(o);return o;}
+function taper(pts,rad,seg,mat,fn){
+  var curve=new THREE.CatmullRomCurve3(pts),g=new THREE.TubeGeometry(curve,seg,rad,8,false),pa=g.attributes.position;
+  for(var i=0;i<pa.count;i++){
+    var u=Math.floor(i/9)/seg,c=curve.getPointAt(u),s=fn(u);
+    pa.setXYZ(i,c.x+(pa.getX(i)-c.x)*s,c.y+(pa.getY(i)-c.y)*s,c.z+(pa.getZ(i)-c.z)*s);
+  }
+  return new THREE.Mesh(g,mat);
+}
+
+/* Cuerpo de fantasmita: cúpula redonda, falda con borde grueso que ondula */
+var prof=[[0,-.9],[.5,-.95],[.95,-1.08],[1.22,-1.25],[1.38,-1.38],[1.5,-1.3],[1.52,-1.18],[1.36,-.92],[1.17,-.55],[1.07,-.15],[1.03,.3],[1.0,.75],[.92,1.12],[.75,1.42],[.45,1.62],[0,1.7]];
+var cp=new THREE.CatmullRomCurve3(prof.map(function(p){return new THREE.Vector3(p[0],p[1],0);}),false,'centripetal');
+var lp=cp.getPoints(110).map(function(v){return new THREE.Vector2(Math.max(0,v.x),v.y);});
+var bodyGeo=new THREE.LatheGeometry(lp,64);
+var bodyPos=bodyGeo.attributes.position,basePos=bodyPos.array.slice(),NV=bodyPos.count;
+var ANG=new Float32Array(NV),WG=new Float32Array(NV),RR=new Float32Array(NV);
+for(var v=0;v<NV;v++){
+  var bx=basePos[v*3],by=basePos[v*3+1],bz=basePos[v*3+2];
+  ANG[v]=Math.atan2(bx,bz);RR[v]=Math.sqrt(bx*bx+bz*bz)||1;
+  WG[v]=sstep(-.35,-1.15,by)*Math.min(1,RR[v]/.9);
+}
+var bodyMesh=new THREE.Mesh(bodyGeo,bodyM);bodyMesh.renderOrder=1;pivot.add(bodyMesh);
+var halo=new THREE.Mesh(bodyGeo,haloM);halo.scale.set(1.07,1.04,1.07);halo.renderOrder=0;pivot.add(halo);
+
+/* Nubecitas de humo */
+var cloudTex=(function(){
+  var cv=document.createElement('canvas');cv.width=cv.height=128;var cx=cv.getContext('2d');
+  [[64,64,56],[44,60,34],[86,58,36],[60,40,30],[66,88,32],[34,82,22],[94,86,24]].forEach(function(b){
+    var g=cx.createRadialGradient(b[0],b[1],0,b[0],b[1],b[2]);g.addColorStop(0,'rgba(255,255,255,.55)');g.addColorStop(1,'rgba(255,255,255,0)');
+    cx.fillStyle=g;cx.fillRect(0,0,128,128);});
+  return new THREE.CanvasTexture(cv);
+})();
+function puff(par,x,y,z,sz,col,op,ro){
+  var m=new THREE.SpriteMaterial({map:cloudTex,color:col,transparent:true,opacity:op,depthWrite:false});
+  var sp=new THREE.Sprite(m);sp.position.set(x,y,z);sp.scale.set(sz*2,sz*2,1);sp.renderOrder=ro;par.add(sp);
+  return {sp:sp,m:m};
+}
+
+/* Ojos grandes: borde claro, iris violeta, pupila, brillos y destellos */
+function eyeTex(layer){
+  var cv=document.createElement('canvas');cv.width=cv.height=256;var c=cv.getContext('2d');
+  if(layer==='base'){
+    var g=c.createLinearGradient(0,32,0,224);g.addColorStop(0,'#efe4ff');g.addColorStop(1,'#ffffff');
+    c.beginPath();c.ellipse(128,128,82,96,0,0,Math.PI*2);c.fillStyle=g;c.fill();
+    c.lineWidth=5;c.strokeStyle='rgba(88,40,170,.55)';c.stroke();
+  }else{
+    var ir=c.createLinearGradient(0,52,0,204);ir.addColorStop(0,'#2b0d5e');ir.addColorStop(.55,'#6b2fc4');ir.addColorStop(1,'#d28cff');
+    c.beginPath();c.ellipse(128,130,62,76,0,0,Math.PI*2);c.fillStyle=ir;c.fill();
+    c.lineWidth=4;c.strokeStyle='#2b0d5e';c.stroke();
+    c.beginPath();c.ellipse(128,126,30,38,0,0,Math.PI*2);c.fillStyle='#13041f';c.fill();
+    var gl=c.createRadialGradient(128,190,0,128,190,52);gl.addColorStop(0,'rgba(255,190,255,.75)');gl.addColorStop(1,'rgba(255,190,255,0)');
+    c.save();c.beginPath();c.ellipse(128,130,62,76,0,0,Math.PI*2);c.clip();c.fillStyle=gl;c.fillRect(60,120,140,100);c.restore();
+    c.fillStyle='#ffffff';
+    c.beginPath();c.arc(152,92,17,0,Math.PI*2);c.fill();
+    c.beginPath();c.arc(104,168,7,0,Math.PI*2);c.fill();
+    c.beginPath();c.arc(150,176,4,0,Math.PI*2);c.fill();
+  }
+  return new THREE.CanvasTexture(cv);
+}
+var eyes=[],looks=[],eyeTexs=[],PG=new THREE.PlaneGeometry(.9,.9);
+[-1,1].forEach(function(sd){
+  var g=new THREE.Group();g.position.set(sd*.45,.75,.92);g.rotation.y=sd*.47;pivot.add(g);
+  var tb=eyeTex('base'),ti=eyeTex('iris');eyeTexs.push(tb,ti);
+  function mk(t,z,ro){var m=new THREE.Mesh(PG,new THREE.MeshBasicMaterial({map:t,transparent:true,depthWrite:false}));m.position.z=z;m.renderOrder=ro;return m;}
+  var iris=mk(ti,.006,6);g.add(mk(tb,0,5));g.add(iris);
+  eyes.push(g);looks.push(iris);
+});
+
+/* Cejas: finitas, se notan solo al expresarse */
+var browM=new THREE.MeshBasicMaterial({color:0xcbb0ff,transparent:true,opacity:.25,depthWrite:false});
+var brows=[];
+[-1,1].forEach(function(sd){
+  var g=new THREE.Group();g.position.set(sd*.45,1.2,.8);g.rotation.y=sd*.5;pivot.add(g);
+  var pts=[new THREE.Vector3(-.2,-.04,0),new THREE.Vector3(-.08,.05,.02),new THREE.Vector3(.08,.06,.02),new THREE.Vector3(.2,-.02,0)];
+  var b=taper(pts,.04,18,browM,function(u){return .35+.65*Math.sin(Math.PI*u);});b.renderOrder=6;g.add(b);
+  brows.push(g);
+});
+
+/* Mejillas y boca pequeña */
+[-1,1].forEach(function(sd){
+  var c=new THREE.Mesh(new THREE.CircleGeometry(.2,20),new THREE.MeshBasicMaterial({color:0xff9ad8,transparent:true,opacity:.22,blending:THREE.AdditiveBlending,depthWrite:false}));
+  c.position.set(sd*.7,.48,.74);c.rotation.y=sd*.8;c.renderOrder=5;pivot.add(c);
+});
+var mouth=new THREE.Group();mouth.position.set(0,.5,1.03);mouth.scale.setScalar(.75);pivot.add(mouth);
+var ms=new THREE.Shape();ms.moveTo(-.2,.02);ms.quadraticCurveTo(0,-.01,.2,.02);ms.bezierCurveTo(.17,-.2,-.17,-.2,-.2,.02);
+var mInner=new THREE.Mesh(new THREE.ShapeGeometry(ms,12),new THREE.MeshBasicMaterial({color:0x3b0f55,side:THREE.DoubleSide}));
+mInner.position.z=.01;mInner.renderOrder=6;mouth.add(mInner);
+var tongue=sph(new THREE.MeshBasicMaterial({color:0xff7ac8}),0,-.06,.02,.1,.05,.01,mouth);tongue.renderOrder=7;
+var smileM=new THREE.MeshBasicMaterial({color:0x3a1470,transparent:true});
+var smile=new THREE.Mesh(new THREE.TorusGeometry(.19,.024,8,24,Math.PI),smileM);
+smile.rotation.z=Math.PI;smile.position.set(0,.1,.02);smile.scale.set(1,.55,1);smile.renderOrder=6;mouth.add(smile);
+
+/* Bracitos redondeados (manoplas de humo) */
+var arms=[],hands=[];
+[-1,1].forEach(function(sd){
+  var g=new THREE.Group();g.position.set(sd*.88,sd>0?.5:.12,.28);pivot.add(g);
+  var hm=M({base:0x7d55e6,mid:0xb79bff,rim:0xf3e6ff,rimK:1,edge:.25,alpha:.98,transparent:true});
+  var mit=sph(hm,sd*.26,-.04,0,.4,.29,.27,g);mit.rotation.z=-sd*.35;mit.renderOrder=1;
+  arms.push(g);hands.push({mesh:mit,m:hm,puff:puff(g,sd*.26,-.04,.05,.3,0xd7b8ff,0,3)});
+});
+
+
+return {rig,pivot,mats,bodyPos,basePos,NV,ANG,WG,RR,eyes,looks,brows,browM,mouth,mInner,tongue,smile,smileM,arms,hands};}
+
+function buildAlgarrobo(){
+const M = (c, r = .85) => new THREE.MeshStandardMaterial({color: c, roughness: r});
+const bark = M(0x7b4b2a, .95), skin = M(0xcf965a, .8), skinD = M(0xb97d45, .8);
+const leaves = [0x4f8a2b, 0x6aa332, 0x3f7a2a, 0x86b83a].map(c => M(c, .8));
+const gray = M(0xd2cbbb, 1);
+const sph = new THREE.SphereGeometry(1, 24, 16);
+const add = (p, g, m, x = 0, y = 0, z = 0, sx = 1, sy = 1, sz = 1) => {
+  const o = new THREE.Mesh(g, m); o.position.set(x, y, z); o.scale.set(sx, sy, sz);
+  o.castShadow = true; p.add(o); return o;
+};
+let seed = 7; const rnd = () => (seed = seed * 16807 % 2147483647) / 2147483647;
+
+/* ====== DON ALGARROBO ====== */
+const tree = new THREE.Group();
+
+// Tronco con corteza rugosa y base ensanchada
+const tg = new THREE.CylinderGeometry(1, 1.8, 4.8, 48, 30);
+const ps = tg.attributes.position;
+for (let i = 0; i < ps.count; i++) {
+  const x = ps.getX(i), y = ps.getY(i), z = ps.getZ(i), a = Math.atan2(z, x);
+  const k = 1 + .06 * Math.sin(a * 7 + y * 1.4) + .035 * Math.sin(a * 15 - y * 2.3) + .025 * Math.sin(y * 3 + a * 3);
+  const fl = 1 + .35 * Math.pow(Math.max(0, (-1.2 - y) / 1.2), 2);
+  ps.setXYZ(i, x * k * fl, y, z * k * fl);
+}
+tg.computeVertexNormals();
+const trunk = add(tree, tg, bark, 0, 2.4, 0);
+trunk.receiveShadow = true;
+
+// Rostro
+const face = new THREE.Group(); face.position.set(0, 3.3, 0); tree.add(face);
+add(face, sph, skin, 0, 0, 1.1, .88, 1.05, .5);               // placa del rostro
+add(face, sph, skinD, 0, -.02, 1.6, .17, .22, .17);           // nariz
+for (const s of [-1, 1]) add(face, sph, M(0xe0896a, .9), s * .52, -.2, 1.42, .17, .12, .06); // mejillas
+const eyes = [], irises = [];
+for (const s of [-1, 1]) {
+  const e = new THREE.Group(); e.position.set(s * .34, .25, 1.5); face.add(e);
+  add(e, sph, M(0xffffff, .3), 0, 0, 0, .21, .21, .15);
+  const ir = new THREE.Group(); e.add(ir);
+  add(ir, sph, M(0x5a3412, .4), 0, 0, .12, .12, .12, .05);
+  add(ir, sph, M(0x050505, .3), 0, 0, .16, .06, .06, .03);
+  add(ir, sph, M(0xffffff, .1), .035, .04, .19, .02, .02, .01);
+  eyes.push(e); irises.push(ir);
+}
+const cap = new THREE.CapsuleGeometry(.04, .3, 4, 8);
+const brows = [-1, 1].map(s => {
+  const b = new THREE.Group(); b.position.set(s * .36, .56, 1.5); face.add(b);
+  const m = add(b, cap, gray, 0, 0, 0, 1, 1, 1.4); m.rotation.z = Math.PI / 2; return b;
+});
+// Bigote y barba
+for (const s of [-1, 1]) add(face, sph, gray, s * .13, -.2, 1.55, .15, .06, .07);
+[[0, -.82, 1.4, .3, .22], [-.2, -.72, 1.4, .17, .17], [.2, -.72, 1.4, .17, .17], [0, -1.05, 1.3, .14, .2]]
+  .forEach(([x, y, z, a, b]) => add(face, sph, gray, x, y, z, a, b, .1));
+// Boca (se mueve con la voz)
+const mouth = new THREE.Group(); mouth.position.set(0, -.4, 1.5); face.add(mouth);
+const inner = add(mouth, new THREE.SphereGeometry(1, 20, 10, 0, Math.PI * 2, Math.PI / 2, Math.PI / 2),
+  new THREE.MeshStandardMaterial({color: 0x3a0f10, side: THREE.DoubleSide}), 0, .1, 0, .3, .05, .12);
+const teeth = add(mouth, new THREE.BoxGeometry(.5, .07, .05), M(0xffffff, .4), 0, .07, .08);
+const lip = add(mouth, new THREE.TorusGeometry(.32, .035, 8, 24, Math.PI), M(0x8a4a2a), 0, .14, .08);
+lip.rotation.z = Math.PI;
+
+// Ramas-brazos con manos
+const arms = [-1, 1].map(s => {
+  const p = new THREE.Group(); p.position.set(s * 1.15, 3.6, .35); tree.add(p);
+  const c = new THREE.CatmullRomCurve3([[0, 0, 0], [.7, -.1, .3], [1.4, .35, .6], [2, .9, .8]]
+    .map(a => new THREE.Vector3(a[0] * s, a[1], a[2])));
+  add(p, new THREE.TubeGeometry(c, 16, .2, 10), bark);
+  const h = new THREE.Group(); h.position.copy(c.getPoint(1)); p.add(h);
+  add(h, sph, skinD, 0, 0, 0, .27, .27, .2);
+  const fg = new THREE.CapsuleGeometry(.065, .26, 4, 8);
+  for (let k = 0; k < 3; k++) { const f = add(h, fg, skinD, (k - 1) * .14, .3, 0); f.rotation.z = -(k - 1) * .28; }
+  const th = add(h, fg, skinD, -s * .27, .1, 0); th.rotation.z = s * .9;
+  return p;
+});
+
+// Copa, ramas altas y vainas
+const canopy = new THREE.Group(); tree.add(canopy);
+for (const [x, z] of [[-2, .3], [2.1, .2], [0, -1.2]]) {
+  const c = new THREE.CatmullRomCurve3([new THREE.Vector3(x * .1, 4.5, 0), new THREE.Vector3(x * .6, 5.8, z * .5), new THREE.Vector3(x, 6.8, z)]);
+  add(canopy, new THREE.TubeGeometry(c, 12, .32, 8), bark);
+}
+const pod = new THREE.CapsuleGeometry(.07, .4, 4, 8), podM = new THREE.MeshStandardMaterial({color:0xd9a441,roughness:.6,emissive:0xffb347,emissiveIntensity:.8});
+for (let i = 0; i < 52; i++) {
+  const a = rnd() * 6.28, d = Math.sqrt(rnd());
+  const x = Math.cos(a) * d * 4.8, z = Math.sin(a) * d * 3.8, y = 7.2 + Math.sqrt(1 - d * d) * 1.8 + (rnd() - .5);
+  const sc = 1.1 + rnd() * .8;
+  add(canopy, sph, leaves[i % 4], x, y, z, sc, sc * .65, sc);
+  if (i % 2 === 0 && y < 8.6) add(canopy, pod, podM, x + (rnd() - .5), y - sc * .6 - .2, z + sc * .5);
+}
+
+// Raíces (sus pies)
+for (let i = 0; i < 7; i++) {
+  const a = -.4 + i / 6 * (Math.PI + .8), cx = Math.cos(a), cz = Math.sin(a) * .9 + .2;
+  const c = new THREE.CatmullRomCurve3([new THREE.Vector3(cx * .8, 1.1, cz * .8), new THREE.Vector3(cx * 1.9, .35, cz * 1.9), new THREE.Vector3(cx * 3, .1, cz * 3)]);
+  add(tree, new THREE.TubeGeometry(c, 14, .28, 8), bark);
+  add(tree, sph, bark, cx * 3, .1, cz * 3, .28, .22, .28);
+}
+
+
+return {tree,face,eyes,irises,brows,inner,teeth,lip,arms,canopy,mouth,podM,leaves};}
+
+const gB=buildGaia(),sB=buildSombrio(),aB=buildAlgarrobo();
+aB.leaves.forEach(m=>{m.emissive=new THREE.Color(0x2e5a14);m.emissiveIntensity=.55});
+const CH={gaia:{k:'gaia',m:gB,obj:gB.G,sp:false,sim:false,last:'',ph:1.3,bt:1.5,bl:0,lv:0,head:[-3.5,2.6,1.9],far:7.5},
+ algarrobo:{k:'algarrobo',m:aB,obj:aB.tree,sp:false,sim:false,last:'',ph:2.1,bt:2.5,bl:0,lv:0,head:[0,2.6,-3.6],far:10.5},
+ sombrio:{k:'sombrio',m:sB,obj:sB.rig,sp:false,sim:false,last:'',ph:.7,bt:2,bl:0,lv:0,head:[3.6,2.5,1.9],far:7.5}};
+gB.G.position.set(-3.5,0,1.9);gB.G.rotation.y=.4;gB.G.scale.setScalar(1.05);
+sB.rig.position.set(3.6,1.5,1.9);sB.rig.rotation.y=-.4;sB.rig.scale.setScalar(.95);
+aB.tree.position.set(0,0,-4.6);aB.tree.scale.setScalar(.78);
+[gB.G,sB.rig,aB.tree].forEach(o=>{S.add(o);o.traverse(x=>{if(x.isMesh&&!x.material.isShaderMaterial&&!x.material.transparent)x.castShadow=true})});
+const wipe=sB.mats;
+// ---------- animación ----------
+let sess={},stop=false,anyOn=false,auto=true;const clock=new THREE.Clock();
+function lvFor(c,t){let tg=0;if(c.sim)tg=.25+.45*Math.abs(Math.sin(t*12+c.ph))*Math.abs(Math.sin(t*3.1+c.ph));else if(sess[c.k]&&c.sp){try{tg=Math.min(1,sess[c.k].getOutputVolume()*2.4)}catch(e){}}c.lv+=(tg-c.lv)*.4;return c.lv}
+function blinkOf(c,dt){c.bt-=dt;if(c.bt<0){c.bl=1;c.bt=2+Math.random()*3.5}c.bl=Math.max(0,c.bl-dt*7);return c.bl>0?Math.sin(c.bl*Math.PI):0}
+function animGaia(c,t,dt){const g=c.m,sp=c.sp||c.sim,lv=lvFor(c,t),b=blinkOf(c,dt);
+ g.root.position.y=.12+Math.sin(t*1.4+c.ph)*.08+(sp?Math.abs(Math.sin(t*6))*.03:0);g.root.rotation.z=Math.sin(t*.8)*.035;g.root.rotation.y=Math.sin(t*.55)*.1;
+ g.hp.rotation.set(sp?Math.sin(t*6.5)*.03*lv:0,c.ly,Math.sin(t*.9)*.025);
+ [g.eL,g.eR].forEach(e=>e.setLid(1.05*(1-b),0));
+ g.inner.scale.set(1.05*(1-lv*.25),Math.max(.01,lv),.5);g.inner.position.y=-lv*.04;g.lips.scale.set(.9,Math.max(.08,.9-lv*.8),1);
+ g.aR.rotation.z=.2+Math.sin(t*1.3)*.05+(sp?Math.sin(t*5)*.3+.3:0);g.aL.rotation.z=-.2-Math.sin(t*1.3+1)*.05;
+ g.lgL.rotation.x=Math.sin(t*1.4)*.05;g.lgR.rotation.x=-Math.sin(t*1.4)*.05;g.cape.rotation.x=Math.sin(t*1.5)*.06}
+function animSom(c,t,dt){const g=c.m,sp=c.sp||c.sim,lv=lvFor(c,t),b=blinkOf(c,dt);
+ g.mats.forEach(m=>m.uniforms.uT.value=t);
+ g.rig.rotation.z=Math.sin(t*.9)*.045;g.rig.rotation.y=-.4+c.ly*.5;g.rig.rotation.x=Math.sin(t*.7+1)*.03;c.obj.position.y=1.5+Math.sin(t*1.3)*.16+Math.sin(t*.52+1)*.06;
+ const a=g.bodyPos.array,bb=g.basePos;for(let i=0;i<g.NV;i++){const w=g.WG[i];if(w===0)continue;const an=g.ANG[i],j=i*3;
+  const dy=w*(.15*Math.sin(3*an+1.2)+.08*Math.sin(5*an+.5)+(.06*Math.sin(3*an+t*1.3)+.04*Math.sin(5*an-t)));const dr=w*(.06*Math.sin(4*an+.7)+.03*Math.sin(4*an+t*1.1));
+  a[j]=bb[j]+bb[j]/g.RR[i]*dr;a[j+1]=bb[j+1]+dy;a[j+2]=bb[j+2]+bb[j+2]/g.RR[i]*dr}g.bodyPos.needsUpdate=true;
+ g.arms[0].rotation.z=.1-Math.sin(t*1.4+.9)*.12+(sp?Math.sin(t*5)*.1:0);g.arms[1].rotation.z=.28+Math.sin(t*1.4+.4)*.14+(sp?Math.sin(t*5.5)*.12:0);
+ g.eyes.forEach(e=>{e.scale.y=Math.max(.07,1-b*.93)});
+ const o=Math.min(1,lv);g.mInner.visible=g.tongue.visible=o>.04;g.mInner.scale.set(1+o*.12,.15+o*1.5,1);g.tongue.position.y=-.02-o*.16;g.tongue.scale.set(.1,.015+o*.06,.01);g.smileM.opacity=1-Math.min(1,o*3);
+ g.brows.forEach((br,i)=>{br.position.y=1.2+o*.04+Math.sin(t*.8)*.01})}
+function animAlg(c,t,dt){const g=c.m,sp=c.sp||c.sim,lv=lvFor(c,t),b=blinkOf(c,dt);
+ g.inner.scale.y=.04+lv*.3;g.teeth.visible=g.inner.scale.y>.09;g.teeth.position.y=.09;g.lip.scale.y=1-lv*.1;
+ g.brows.forEach((br,i)=>{br.position.y=.56+lv*.06;br.rotation.z=(i?-1:1)*Math.sin(t*2.5)*.02*(sp?1:0)});
+ g.eyes.forEach(e=>e.scale.y=Math.max(.08,1-b*.95));
+ g.tree.scale.y=.78*(1+Math.sin(t*1.2)*.005);g.tree.rotation.y=Math.sin(t*.3)*.05+c.ly*.6;g.canopy.rotation.z=Math.sin(t*.55)*.015;
+ g.arms.forEach((p,i)=>{const s=i===0?-1:1,gg=sp?.12+lv*.5:.03;p.rotation.z=s*(Math.sin(t*2.1+i*1.7)*gg+.05);p.rotation.x=Math.sin(t*1.7+i)*gg*.6});
+ g.podM.emissiveIntensity=.7+.55*Math.sin(t*1.6);warm.intensity=55+25*Math.sin(t*1.6)}
+const look=new THREE.Vector3(0,2.6,-1);cam.position.set(0,3.6,15);
+function shot(asp){const d=asp<1?2.2:1,who=['gaia','algarrobo','sombrio'].find(k=>CH[k].sp||CH[k].sim);
+ if(who){const c=CH[who],h=c.head;return{p:[h[0]*.55,h[1]+.7,h[2]+c.far*d],l:[h[0],h[1],h[2]]}}
+ return{p:[0,3.6,(anyOn?14:16)*d],l:[0,2.6,-1]}}
+function tick(){const dt=Math.min(clock.getDelta(),.05),t=clock.elapsedTime;
+ const spk=ORDER.find(k=>CH[k].sp||CH[k].sim);ORDER.forEach(k=>{const c=CH[k];c.ly=c.ly||0;const tg=spk&&spk!==k?Math.sign(CH[spk].obj.position.x-c.obj.position.x)*(k==='algarrobo'?.25:.3):0;c.ly+=(tg-c.ly)*.06});
+ animGaia(CH.gaia,t,dt);animSom(CH.sombrio,t,dt);animAlg(CH.algarrobo,t,dt);
+ const pa=fg.attributes.position;for(let i=0;i<NF;i++){pa.setY(i,pa.getY(i)+Math.sin(t*.8+fs[i])*.004);pa.setX(i,pa.getX(i)+Math.cos(t*.6+fs[i])*.004)}pa.needsUpdate=true;fm.opacity=.55+.4*Math.sin(t*2.3);
+ if(auto){const s=shot(cam.aspect),q=1-Math.exp(-dt*2.2);cam.position.x+=(s.p[0]+Math.sin(t*.25)*.35-cam.position.x)*q;cam.position.y+=(s.p[1]-cam.position.y)*q;cam.position.z+=(s.p[2]-cam.position.z)*q;look.x+=(s.l[0]-look.x)*q;look.y+=(s.l[1]-look.y)*q;look.z+=(s.l[2]-look.z)*q;cam.lookAt(look)}
+ R.render(S,cam);requestAnimationFrame(tick)}
+function layout(){const wrap=$('wrap'),fm2=$('fmt').value,ww=wrap.clientWidth,wh=wrap.clientHeight,r=fm2==='16'?16/9:fm2==='9'?9/16:ww/wh;let w=ww,h=ww/r;if(h>wh){h=wh;w=h*r}
+ stage.style.width=w+'px';stage.style.height=h+'px';R.setPixelRatio(Math.min(devicePixelRatio,2));R.setSize(w,h,false);cam.aspect=w/h;cam.updateProjectionMatrix();$('sub').style.fontSize=Math.max(12,w/38)+'px'}
+new ResizeObserver(layout).observe($('wrap'));$('fmt').onchange=layout;layout();tick();
+$('fs').onclick=()=>stage.requestFullscreen&&stage.requestFullscreen();$('auto').onchange=e=>{auto=e.target.checked};
+// ---------- subtítulos, estado y conversación ----------
+const st=t=>$('stat').textContent=t;
+function sub(k,txt){const e=$('sub');e.textContent='';const b=document.createElement('b');b.style.color=AG[k]?AG[k].col:'#fff';b.textContent=(AG[k]?AG[k].name:'Los tres juntos')+': ';e.append(b,document.createTextNode(txt));e.style.opacity=1}
+function title(t){const e=$('ttl');e.textContent=t||'EL SECRETO DEL ALGARROBO DE LA LUZ';e.classList.remove('show');void e.offsetWidth;e.classList.add('show')}
+let runId=0,micOn=false,chatMode=false,lastAct=Date.now(),idleN=0,consented=false,micWant=null,quietT=0;
+const dead=my=>my!==runId,anySp=()=>ORDER.some(k=>CH[k].sp||CH[k].sim);
+const wait=async(ms,my)=>{const t0=Date.now();while(Date.now()-t0<ms){if(dead(my))return false;await sleep(80)}return true};
+const gap=(my,min=1100)=>wait(min+Math.random()*600,my);
+// espera a que k empiece a hablar y a que TERMINE de hablar; después deja un respiro
+async function done(k,my){const t0=Date.now();while(!CH[k].sp){if(dead(my)||Date.now()-t0>22000)return false;await sleep(100)}
+ while(CH[k].sp){if(dead(my))return false;await sleep(120)}return wait(500,my)}
+async function open(k){const {Conversation}=await import('@elevenlabs/client');
+ sess[k]=await Conversation.startSession({agentId:AG[k].id,connectionType:'websocket',
+  onModeChange:({mode})=>{CH[k].sp=mode==='speaking'},
+  onMessage:({message,source})=>{if(source==='ai'){CH[k].last=message;sub(k,message)}
+   else if(source==='user'){sub('user',message);lastAct=Date.now();idleN=0;if(chatMode&&micOn===k&&$('to').value==='todos')chainFrom(k,message,runId)}},
+  onError:e=>fail(k,'conexión',e),onDisconnect:()=>{delete sess[k]}});
+ try{sess[k].setMicMuted(true)}catch{}}
+async function consent(){if(consented)return true;const d=$('dlg');d.showModal();consented=await new Promise(r=>d.addEventListener('close',()=>r(d.returnValue==='ok'),{once:true}));return consented}
+async function ensure(k,my){if(sess[k])return true;st('Conectando con '+AG[k].name+'…');
+ try{await open(k)}catch(e){fail(k,/ermission|NotAllowed|NotFound|micr/i.test(String(e&&(e.name||e.message||e)))?'micrófono':'conexión',e);return false}
+ await done(k,my);return !dead(my)}
+async function cleanup(){for(const k in sess){try{await sess[k].endSession()}catch{}}sess={};anyOn=false;chatMode=false;micOn=false;micWant=null;$('mic').textContent='Activar mi micrófono';$('talkui').hidden=true;ORDER.forEach(k=>{CH[k].sp=false;CH[k].sim=false})}
+async function end(){runId++;await cleanup();st('Detenido. Podés elegir otro modo.')}
+async function prep(){if(anyOn)await end();$('err').hidden=true;anyOn=true;return ++runId}
+async function begin(kind){const my=await prep();chatMode=false;title();
+ try{
+  if(kind==='demo'){st('Demostración sin conexión (sin voz).');let prev='';
+   for(const [k,tx] of SCRIPT){if(dead(my))break;if(prev&&!await gap(my,k===prev?700:1200))break;const ks=k==='todos'?ORDER:[k];ks.forEach(x=>CH[x].sim=true);sub(k,tx);const ok=await wait(Math.max(1800,tx.length*62),my);ks.forEach(x=>CH[x].sim=false);if(!ok)break;prev=k}
+   if(!dead(my)){title('FIN');sub('x',FINAL);await wait(5000,my)}}
+  else{if(!await consent()){await cleanup();return}
+   for(const k of ORDER){if(dead(my))return;if(!await ensure(k,my)){if(!dead(my))await cleanup();return}}
+   st(kind==='live'?'Charla en vivo: esperan su turno y se dan unos segundos entre una y otra.':'Guion con voz.');
+   if(kind==='script'){let prev='';for(const [k,tx] of SCRIPT){if(dead(my))break;if(prev&&!await gap(my,k===prev?800:1300))break;const ks=k==='todos'?ORDER:[k];
+     ks.forEach(x=>sess[x]&&sess[x].sendUserMessage('Decí exactamente esta frase, con tu tono y sin agregar nada más: «'+tx+'»'));
+     if(!await done(ks[0],my))break;if(k==='todos')await Promise.all(ks.slice(1).map(x=>done(x,my)));prev=k}
+    if(!dead(my)){title('FIN');sub('x',FINAL);await wait(5000,my)}}
+   else{await gap(my,800);sess.gaia.sendUserMessage('Estás de noche en el monte formoseño con Don Algarrobo y Sombrío. Dicen que un antiguo algarrobo empieza a brillar. Abrí la charla con una pregunta, en una o dos frases.');
+    for(let i=0;i<12&&!dead(my);i++){const s=ORDER[i%3],n=ORDER[(i+1)%3];if(!await done(s,my))break;const tx=CH[s].last;CH[s].last='';if(!tx)break;if(!await gap(my))break;
+     sess[n].sendUserMessage(AG[s].name+' dijo: «'+tx+'». Esperaste a que termine. Respondele en una o dos frases, desde tu personaje y relacionado con lo que dijo. Tema: el algarrobo que brilla en el monte formoseño, cuidar la naturaleza y comprobar antes de concluir. No inventes datos.')}}}
+ }catch(e){fail('gaia','charla',e)}
+ if(!dead(my)){await cleanup();st('Escena terminada.')}}
+// ---------- Charlar con ellos ----------
+async function chatStart(){const my=await prep();chatMode=true;lastAct=Date.now();idleN=0;$('talkui').hidden=false;title('CHARLEMOS');
+ st('Elegí con quién hablar y escribí o activá tu micrófono. Ellos esperan tu turno y no se apuran.');
+ }
+async function chainFrom(f,text,my){if(!await done(f,my))return;let prev=f;
+ for(const o of ORDER.filter(x=>x!==f)){if(!await gap(my,900))return;if(!await ensure(o,my))return;
+  sess[o].sendUserMessage('Una persona dijo: «'+text+'». '+AG[prev].name+' respondió: «'+CH[prev].last+'». Esperaste a que termine. Sumá algo breve de tu parte, en una frase, hablándole a la persona. No repitas lo ya dicho ni inventes datos.');
+  if(!await done(o,my))return;prev=o}lastAct=Date.now()}
+async function chatSay(text){const my=runId,to=$('to').value,f=to==='todos'?'gaia':to;lastAct=Date.now();idleN=0;
+ if(!await consent())return;if(!await ensure(f,my))return;sub('user',text);CH[f].last='';sess[f].sendUserMessage(text);if(to==='todos')chainFrom(f,text,my)}
+$('tf').onsubmit=e=>{e.preventDefault();const v=$('tt').value.trim();if(!v||!chatMode)return;$('tt').value='';chatSay(v)};
+function micOff(){if(micOn&&sess[micOn]){try{sess[micOn].setMicMuted(true)}catch{}}micOn=false;micWant=null;$('mic').textContent='Activar mi micrófono'}
+$('to').onchange=micOff;
+$('mic').onclick=async()=>{if(!chatMode)return;if(micOn){micOff();st('Micrófono silenciado.');return}
+ const my=runId,to=$('to').value,k=to==='todos'?'gaia':to;if(!await consent())return;if(!await ensure(k,my))return;micOn=k;lastAct=Date.now();idleN=0;
+ $('mic').textContent='Silenciar mi micrófono';st('● Micrófono activo: hablás con '+(to==='todos'?'los tres, de a uno':AG[k].name)+'. Esperá a que terminen de hablar. Usá auriculares.')};
+// el micrófono se abre solo cuando nadie habla (y un instante después), para que se respeten los turnos
+setInterval(()=>{const sp=anySp();if(sp)quietT=Date.now();if(!micOn||!sess[micOn])return;const want=!sp&&Date.now()-quietT>800;if(want!==micWant){try{sess[micOn].setMicMuted(!want)}catch{}micWant=want}},200);
+$('b1').onclick=()=>begin('live');$('b2').onclick=()=>begin('script');$('b3').onclick=()=>begin('demo');$('b4').onclick=()=>end();$('b5').onclick=()=>chatStart();
+
+</script></body></html>
